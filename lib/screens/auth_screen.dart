@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'profile_screen.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -15,6 +14,7 @@ class _AuthScreenState extends State<AuthScreen> {
   final _passwordController = TextEditingController();
   bool _isLogin = true;
   bool _isLoading = false;
+  bool _obscurePassword = true;
 
   @override
   void dispose() {
@@ -23,7 +23,55 @@ class _AuthScreenState extends State<AuthScreen> {
     super.dispose();
   }
 
+  /// Get user-friendly error message from Firebase error code
+  String _getErrorMessage(String code) {
+    switch (code) {
+      case 'user-not-found':
+        return 'No user found with this email.';
+      case 'wrong-password':
+        return 'Wrong password provided.';
+      case 'email-already-in-use':
+        return 'An account already exists with this email.';
+      case 'weak-password':
+        return 'Password should be at least 6 characters.';
+      case 'invalid-email':
+        return 'Invalid email address.';
+      case 'user-disabled':
+        return 'This account has been disabled.';
+      case 'too-many-requests':
+        return 'Too many attempts. Please try again later.';
+      case 'operation-not-allowed':
+        return 'Email/password accounts are not enabled.';
+      case 'invalid-credential':
+        return 'Invalid email or password.';
+      default:
+        return 'An error occurred. Please try again.';
+    }
+  }
+
+  /// Show snackbar with message
+  void _showMessage(String message, {bool isError = false}) {
+    if (!mounted) return;
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.red : Colors.green,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+      ),
+    );
+  }
+
+  /// Handle form submission (register or login)
   Future<void> _submitForm() async {
+    // Dismiss keyboard
+    FocusScope.of(context).unfocus();
+
+    // Validate form
     if (!_formKey.currentState!.validate()) {
       return;
     }
@@ -33,47 +81,34 @@ class _AuthScreenState extends State<AuthScreen> {
     });
 
     try {
+      final email = _emailController.text.trim();
+      final password = _passwordController.text.trim();
+
       if (_isLogin) {
         // Sign in existing user
-        await _signInWithEmailAndPassword();
+        await FirebaseAuth.instance.signInWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+        
+        // StreamBuilder will automatically navigate to ProfileScreen
+        _showMessage('Welcome back!');
       } else {
         // Register new user
-        await _registerWithEmailAndPassword();
+        await FirebaseAuth.instance.createUserWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+        
+        // StreamBuilder will automatically navigate to ProfileScreen
+        _showMessage('Account created successfully!');
       }
     } on FirebaseAuthException catch (e) {
-      String message = 'An error occurred';
-      
-      if (e.code == 'user-not-found') {
-        message = 'No user found with this email.';
-      } else if (e.code == 'wrong-password') {
-        message = 'Wrong password provided.';
-      } else if (e.code == 'email-already-in-use') {
-        message = 'An account already exists with this email.';
-      } else if (e.code == 'weak-password') {
-        message = 'Password should be at least 6 characters.';
-      } else if (e.code == 'invalid-email') {
-        message = 'Invalid email address.';
-      } else {
-        message = e.message ?? 'Authentication failed';
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(message),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      // Handle Firebase authentication errors
+      _showMessage(_getErrorMessage(e.code), isError: true);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      // Handle any other errors
+      _showMessage('An unexpected error occurred.', isError: true);
     } finally {
       if (mounted) {
         setState(() {
@@ -83,42 +118,12 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
-  Future<void> _signInWithEmailAndPassword() async {
-    await FirebaseAuth.instance.signInWithEmailAndPassword(
-      email: _emailController.text.trim(),
-      password: _passwordController.text.trim(),
-    );
-
-    if (mounted) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => const ProfileScreen(),
-        ),
-      );
-    }
-  }
-
-  Future<void> _registerWithEmailAndPassword() async {
-    await FirebaseAuth.instance.createUserWithEmailAndPassword(
-      email: _emailController.text.trim(),
-      password: _passwordController.text.trim(),
-    );
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Registration successful! Please sign in.'),
-          backgroundColor: Colors.green,
-        ),
-      );
-      
-      setState(() {
-        _isLogin = true;
-        _emailController.clear();
-        _passwordController.clear();
-      });
-    }
+  /// Toggle between login and register mode
+  void _toggleAuthMode() {
+    setState(() {
+      _isLogin = !_isLogin;
+      _formKey.currentState?.reset();
+    });
   }
 
   @override
@@ -151,12 +156,22 @@ class _AuthScreenState extends State<AuthScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(
-                          Icons.lock_outline,
-                          size: 80,
-                          color: Colors.blue.shade700,
+                        // App Logo/Icon
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.shade50,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.lock_outline,
+                            size: 64,
+                            color: Colors.blue.shade700,
+                          ),
                         ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 24),
+
+                        // Title
                         Text(
                           _isLogin ? 'Welcome Back!' : 'Create Account',
                           style: TextStyle(
@@ -166,9 +181,11 @@ class _AuthScreenState extends State<AuthScreen> {
                           ),
                         ),
                         const SizedBox(height: 8),
+
+                        // Subtitle
                         Text(
-                          _isLogin 
-                              ? 'Sign in to continue' 
+                          _isLogin
+                              ? 'Sign in to continue'
                               : 'Register to get started',
                           style: TextStyle(
                             fontSize: 16,
@@ -176,16 +193,22 @@ class _AuthScreenState extends State<AuthScreen> {
                           ),
                         ),
                         const SizedBox(height: 32),
+
+                        // Email Field
                         TextFormField(
                           controller: _emailController,
                           decoration: InputDecoration(
                             labelText: 'Email',
+                            hintText: 'Enter your email',
                             prefixIcon: const Icon(Icons.email_outlined),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
                             ),
+                            filled: true,
+                            fillColor: Colors.grey.shade50,
                           ),
                           keyboardType: TextInputType.emailAddress,
+                          textInputAction: TextInputAction.next,
                           validator: (value) {
                             if (value == null || value.isEmpty) {
                               return 'Please enter your email';
@@ -193,20 +216,44 @@ class _AuthScreenState extends State<AuthScreen> {
                             if (!value.contains('@')) {
                               return 'Please enter a valid email';
                             }
+                            // Basic email validation
+                            final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
+                            if (!emailRegex.hasMatch(value)) {
+                              return 'Please enter a valid email format';
+                            }
                             return null;
                           },
                         ),
                         const SizedBox(height: 16),
+
+                        // Password Field
                         TextFormField(
                           controller: _passwordController,
                           decoration: InputDecoration(
                             labelText: 'Password',
+                            hintText: 'Enter your password',
                             prefixIcon: const Icon(Icons.lock_outlined),
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                _obscurePassword
+                                    ? Icons.visibility_outlined
+                                    : Icons.visibility_off_outlined,
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  _obscurePassword = !_obscurePassword;
+                                });
+                              },
+                            ),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
                             ),
+                            filled: true,
+                            fillColor: Colors.grey.shade50,
                           ),
-                          obscureText: true,
+                          obscureText: _obscurePassword,
+                          textInputAction: TextInputAction.done,
+                          onFieldSubmitted: (_) => _submitForm(),
                           validator: (value) {
                             if (value == null || value.isEmpty) {
                               return 'Please enter your password';
@@ -218,6 +265,8 @@ class _AuthScreenState extends State<AuthScreen> {
                           },
                         ),
                         const SizedBox(height: 24),
+
+                        // Submit Button
                         SizedBox(
                           width: double.infinity,
                           height: 50,
@@ -225,39 +274,53 @@ class _AuthScreenState extends State<AuthScreen> {
                             onPressed: _isLoading ? null : _submitForm,
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.blue.shade700,
+                              foregroundColor: Colors.white,
+                              disabledBackgroundColor: Colors.grey.shade300,
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
                               ),
+                              elevation: 2,
                             ),
                             child: _isLoading
-                                ? const CircularProgressIndicator(
-                                    color: Colors.white,
+                                ? const SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 2,
+                                    ),
                                   )
                                 : Text(
                                     _isLogin ? 'Sign In' : 'Register',
                                     style: const TextStyle(
                                       fontSize: 18,
                                       fontWeight: FontWeight.bold,
-                                      color: Colors.white,
                                     ),
                                   ),
                           ),
                         ),
                         const SizedBox(height: 16),
+
+                        // Toggle Auth Mode Button
                         TextButton(
-                          onPressed: () {
-                            setState(() {
-                              _isLogin = !_isLogin;
-                              _formKey.currentState?.reset();
-                            });
-                          },
-                          child: Text(
-                            _isLogin
-                                ? "Don't have an account? Register"
-                                : 'Already have an account? Sign In',
-                            style: TextStyle(
-                              color: Colors.blue.shade700,
-                              fontWeight: FontWeight.w600,
+                          onPressed: _isLoading ? null : _toggleAuthMode,
+                          child: RichText(
+                            text: TextSpan(
+                              style: const TextStyle(color: Colors.black87),
+                              children: [
+                                TextSpan(
+                                  text: _isLogin
+                                      ? "Don't have an account? "
+                                      : 'Already have an account? ',
+                                ),
+                                TextSpan(
+                                  text: _isLogin ? 'Register' : 'Sign In',
+                                  style: TextStyle(
+                                    color: Colors.blue.shade700,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),

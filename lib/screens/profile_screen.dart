@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'auth_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -14,6 +13,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _formKey = GlobalKey<FormState>();
   bool _isChangingPassword = false;
   bool _isLoading = false;
+  bool _obscurePassword = true;
 
   @override
   void dispose() {
@@ -21,31 +21,47 @@ class _ProfileScreenState extends State<ProfileScreen> {
     super.dispose();
   }
 
-  Future<void> _signOut() async {
-    try {
-      await FirebaseAuth.instance.signOut();
-      
-      if (mounted) {
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(
-            builder: (context) => const AuthScreen(),
-          ),
-          (route) => false,
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error signing out: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+  /// Get user-friendly error message from Firebase error code
+  String _getErrorMessage(String code) {
+    switch (code) {
+      case 'weak-password':
+        return 'Password should be at least 6 characters.';
+      case 'requires-recent-login':
+        return 'Please log out and log in again before changing password.';
+      default:
+        return 'An error occurred. Please try again.';
     }
   }
 
+  /// Show snackbar with message
+  void _showMessage(String message, {bool isError = false}) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.red : Colors.green,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+      ),
+    );
+  }
+
+  /// Sign out user - StreamBuilder will automatically handle navigation
+  Future<void> _signOut() async {
+    try {
+      await FirebaseAuth.instance.signOut();
+      // StreamBuilder in main.dart will automatically navigate to AuthScreen
+      _showMessage('Signed out successfully');
+    } catch (e) {
+      _showMessage('Error signing out. Please try again.', isError: true);
+    }
+  }
+
+  /// Change user password
   Future<void> _changePassword() async {
     if (!_formKey.currentState!.validate()) {
       return;
@@ -57,18 +73,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     try {
       User? user = FirebaseAuth.instance.currentUser;
-      
+
       if (user != null) {
         await user.updatePassword(_newPasswordController.text.trim());
-        
+
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Password changed successfully!'),
-              backgroundColor: Colors.green,
-            ),
-          );
-          
+          _showMessage('Password changed successfully!');
+
           setState(() {
             _isChangingPassword = false;
             _newPasswordController.clear();
@@ -76,24 +87,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         }
       }
     } on FirebaseAuthException catch (e) {
-      String message = 'Failed to change password';
-      
-      if (e.code == 'weak-password') {
-        message = 'Password should be at least 6 characters.';
-      } else if (e.code == 'requires-recent-login') {
-        message = 'Please log out and log in again before changing password.';
-      } else {
-        message = e.message ?? 'An error occurred';
-      }
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(message),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      _showMessage(_getErrorMessage(e.code), isError: true);
+    } catch (e) {
+      _showMessage('An unexpected error occurred.', isError: true);
     } finally {
       if (mounted) {
         setState(() {
@@ -103,16 +99,48 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  /// Show logout confirmation dialog
+  Future<void> _showLogoutDialog() async {
+    return showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirm Logout'),
+        content: const Text('Are you sure you want to logout?'),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _signOut();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Logout'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final User? user = FirebaseAuth.instance.currentUser;
-    
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Profile'),
         backgroundColor: Colors.blue.shade700,
         foregroundColor: Colors.white,
         elevation: 0,
+        centerTitle: true,
       ),
       body: Container(
         decoration: BoxDecoration(
@@ -155,9 +183,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
                   const SizedBox(height: 24),
-                  
+
                   // Welcome Text
-                  Text(
+                  const Text(
                     'Welcome!',
                     style: TextStyle(
                       fontSize: 32,
@@ -166,7 +194,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  
+
                   // Email Display Card
                   Card(
                     elevation: 4,
@@ -201,12 +229,45 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             ),
                             textAlign: TextAlign.center,
                           ),
+                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.green.shade50,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: Colors.green.shade200,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.verified,
+                                  size: 16,
+                                  color: Colors.green.shade700,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Authenticated',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.green.shade700,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ],
                       ),
                     ),
                   ),
                   const SizedBox(height: 24),
-                  
+
                   // Change Password Section
                   if (_isChangingPassword) ...[
                     Card(
@@ -233,12 +294,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 controller: _newPasswordController,
                                 decoration: InputDecoration(
                                   labelText: 'New Password',
+                                  hintText: 'Enter new password',
                                   prefixIcon: const Icon(Icons.lock_outlined),
+                                  suffixIcon: IconButton(
+                                    icon: Icon(
+                                      _obscurePassword
+                                          ? Icons.visibility_outlined
+                                          : Icons.visibility_off_outlined,
+                                    ),
+                                    onPressed: () {
+                                      setState(() {
+                                        _obscurePassword = !_obscurePassword;
+                                      });
+                                    },
+                                  ),
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(12),
                                   ),
+                                  filled: true,
+                                  fillColor: Colors.grey.shade50,
                                 ),
-                                obscureText: true,
+                                obscureText: _obscurePassword,
                                 validator: (value) {
                                   if (value == null || value.isEmpty) {
                                     return 'Please enter a new password';
@@ -267,7 +343,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                           vertical: 12,
                                         ),
                                         shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(12),
+                                          borderRadius:
+                                              BorderRadius.circular(12),
                                         ),
                                       ),
                                       child: const Text('Cancel'),
@@ -276,14 +353,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   const SizedBox(width: 12),
                                   Expanded(
                                     child: ElevatedButton(
-                                      onPressed: _isLoading ? null : _changePassword,
+                                      onPressed:
+                                          _isLoading ? null : _changePassword,
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: Colors.blue.shade700,
+                                        foregroundColor: Colors.white,
                                         padding: const EdgeInsets.symmetric(
                                           vertical: 12,
                                         ),
                                         shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(12),
+                                          borderRadius:
+                                              BorderRadius.circular(12),
                                         ),
                                       ),
                                       child: _isLoading
@@ -295,10 +375,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                                 strokeWidth: 2,
                                               ),
                                             )
-                                          : const Text(
-                                              'Update',
-                                              style: TextStyle(color: Colors.white),
-                                            ),
+                                          : const Text('Update'),
                                     ),
                                   ),
                                 ],
@@ -336,13 +413,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                     const SizedBox(height: 16),
                   ],
-                  
+
                   // Logout Button
                   SizedBox(
                     width: double.infinity,
                     height: 50,
                     child: ElevatedButton.icon(
-                      onPressed: _signOut,
+                      onPressed: _showLogoutDialog,
                       icon: const Icon(Icons.logout),
                       label: const Text('Logout'),
                       style: ElevatedButton.styleFrom(
